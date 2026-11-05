@@ -157,3 +157,135 @@ La precisión indica cuántas decisiones de la red coinciden con las etiquetas d
 2. **La física es independiente de la red.** La gravedad, el impulso, la altura alcanzada y el tamaño del obstáculo son los que determinan si Neurito pasa. Una decisión acertada según la etiqueta puede resultar demasiado temprana o demasiado tarde para librar el obstáculo.
 
 **En resumen:** una precisión alta significa que la red aprendió bien la regla de las etiquetas, pero no asegura que esa regla sea buena para esquivar obstáculos con la física real del juego.
+# Neurito 3.0: el laberinto
+
+En esta versión, Neurito debe llegar a la comida recorriendo tres laberintos distintos. En cada paso elige uno de cuatro movimientos: ARRIBA, ABAJO, IZQUIERDA o DERECHA. La red neuronal está programada con NumPy, y Pygame se encarga de mostrar el laberinto, las probabilidades de cada acción y la curva de pérdida.
+
+## Cómo aprende
+
+Se usa **aprendizaje supervisado por imitación** (no es aprendizaje por refuerzo). El algoritmo BFS hace de maestro: calcula el mejor camino y de ahí salen las etiquetas con las que se entrena la red. Cuando Neurito juega, decide solo, sin consultar a BFS.
+
+- **Entradas (165):** mapa (3, one-hot) + posición actual (81, one-hot) + posición de la comida (81, one-hot).
+- **Arquitectura:** capa oculta de 96 neuronas con ReLU y capa de salida de 4 neuronas con Softmax.
+- **Entrenamiento:** entropía cruzada, retropropagación, mini-lotes de 256 y tasa de aprendizaje de 0.45.
+- **Datos:** 80 % para entrenar y 20 % para probar. Los pares posición-meta de la prueba nunca se usan al entrenar.
+
+## Modos de juego
+
+| Modo | Comportamiento |
+|------|----------------|
+| Red pura | Ejecuta siempre la acción con mayor probabilidad. Puede chocar con paredes o quedarse dando vueltas. |
+| Asistido | Ignora los movimientos que van contra una pared y penaliza las casillas ya visitadas. Estas reglas son un añadido; la red no las aprendió. |
+
+> Ojo: la exactitud de clasificación (acertar la acción de un solo paso) no equivale al porcentaje de laberintos que Neurito logra completar.
+
+## Estructura del proyecto
+
+| Archivo | Para qué sirve |
+|---------|----------------|
+| `laberinto_mundo.py` | Mapas, movimientos, BFS y navegación asistida |
+| `laberinto_red.py` | Red neuronal y su entrenamiento con NumPy |
+| `laberinto.py` | Juego en Pygame, sprites y gráfica de pérdida |
+| `test_laberinto.py` | Pruebas automáticas |
+| `GUIA_LABERINTO.md` | Guía detallada y experimentos |
+
+Se reutilizan las imágenes `assets/neutral_1.png`, `neutral_2.png` y `neutral_3.png`.
+
+## Cómo ejecutarlo
+
+Desde la carpeta que contiene `pyproject.toml`:
+
+```bash
+uv sync
+uv run laberinto.py
+```
+
+Para correr las pruebas (actualmente pasan las 5):
+
+```bash
+uv run python -m unittest -v test_laberinto.py
+```
+
+## Controles
+
+| Tecla | Acción |
+|-------|--------|
+| 1 | Entrenar una época |
+| 2 | Entrenar cien épocas |
+| 3 | Iniciar o pausar el entrenamiento continuo |
+| A | Cambiar entre red pura y asistida |
+| P | Cambiar entre navegación automática y paso a paso |
+| Espacio | Dar un paso (modo manual) |
+| N | Cambiar de mapa |
+| G | Generar nuevas posiciones de inicio y meta |
+| C | Reiniciar los contadores |
+| R | Reiniciar pesos y entrenamiento |
+| Esc | Salir |
+
+## Experimentos y resultados
+
+Todas las pruebas usan la semilla 42 y se evalúan con los 716 retos de prueba, que la red nunca vio al entrenar. Se considera "éxito" llegar a la comida antes de agotar el límite de pasos. Cada configuración se corrió una sola vez, por lo que los números pueden cambiar con otra semilla.
+
+### 1. Neurito sin entrenar
+
+Con 0 épocas, la red acierta la acción correcta el 27.7 % de las veces y solo llega a la comida en el 3.1 % de los casos (red pura). Sus pesos son aleatorios y no contienen información del laberinto, así que choca con las paredes y repite movimientos.
+
+### 2. Efecto de las épocas (96 neuronas, tasa 0.45)
+
+| Épocas | Pérdida | Exactitud (prueba) | Éxito red pura | Éxito asistido |
+|--------|---------|--------------------|----------------|----------------|
+| 0 | — | 27.7 % | 3.1 % | 57.5 % |
+| 100 | 0.1352 | 84.9 % | 51.3 % | 97.9 % |
+| 200 | 0.0376 | 90.1 % | 81.3 % | 98.9 % |
+| 400 | 0.0107 | 91.5 % | 82.7 % | 99.6 % |
+
+La pérdida cae rápido al principio y después se estabiliza: entre 200 y 400 épocas la mejora ya es pequeña.
+
+### 3. Red pura vs. asistida
+
+A las 400 épocas, la red pura completa el 82.7 % de los retos y la asistida el 99.6 %. La red aporta el rumbo general hacia la comida, y las reglas corrigen choques y ciclos. Incluso sin entrenamiento, la asistencia alcanza el 57.5 %, lo que muestra que parte del éxito se debe a las reglas y no al modelo.
+
+### 4. Número de neuronas ocultas (400 épocas, tasa 0.45)
+
+| Neuronas | Pérdida | Exactitud (prueba) | Éxito pura | Éxito asistido |
+|----------|---------|--------------------|------------|----------------|
+| 16 | 0.0342 | 87.2 % | 74.3 % | 99.0 % |
+| 32 | 0.0161 | 89.3 % | 78.4 % | 98.3 % |
+| 96 | 0.0107 | 91.5 % | 82.7 % | 99.6 % |
+| 128 | 0.0103 | 90.8 % | 85.3 % | 98.7 % |
+
+Más neuronas reducen la pérdida y favorecen a la red pura, pero pasar de 96 a 128 casi no aporta y la exactitud de prueba no mejora.
+
+### 5. Tasa de aprendizaje (400 épocas, 96 neuronas)
+
+| Tasa | Pérdida | Exactitud (prueba) | Éxito pura | Éxito asistido |
+|------|---------|--------------------|------------|----------------|
+| 0.01 | 0.6818 | 73.9 % | 20.4 % | 87.6 % |
+| 0.1 | 0.1490 | 87.2 % | 60.2 % | 98.9 % |
+| 0.45 | 0.0107 | 91.5 % | 82.7 % | 99.6 % |
+| 1.0 | 0.0028 | 93.3 % | 85.5 % | 99.3 % |
+| 2.0 | 0.0011 | 93.3 % | 85.6 % | 99.2 % |
+
+Con tasas bajas el aprendizaje es muy lento. Con 0.45, 1.0 y 2.0 la red converge sin inestabilidad en este problema.
+
+### 6. Cambio de mapa
+
+Los tres mapas forman parte del entrenamiento (la red recibe el identificador del mapa), por eso funciona en todos. Lo que no se entrenó son las combinaciones de inicio y meta usadas en la prueba.
+
+### 7. Cambio de profesor: DFS, BFS y A*
+
+Se reentrenó la misma red (400 épocas) con las etiquetas de cada algoritmo:
+
+| Profesor | Largo medio del camino | Pérdida | Exactitud (prueba) | Éxito pura | Éxito asistido |
+|----------|------------------------|---------|--------------------|------------|----------------|
+| DFS | 10.79 pasos | 0.0112 | 93.4 % | 13.8 % | 42.5 % |
+| BFS | 6.02 pasos | 0.0107 | 91.5 % | 82.7 % | 99.6 % |
+| A* (Manhattan) | 6.02 pasos | 0.0110 | 92.6 % | 86.3 % | 99.4 % |
+
+- **DFS** perjudica mucho a Neurito: sus caminos no son los más cortos y dependen del orden de exploración. La red los imita bien (93.4 % de exactitud), pero esas rutas largas hacen que se pase del límite de pasos.
+- **BFS y A\*** generan caminos óptimos de la misma longitud y Neurito rinde casi igual con ambos. La pequeña diferencia viene de cómo se desempatan rutas igual de cortas.
+- **Conclusión:** la calidad del profesor pesa más que la exactitud. Una red puede copiar a la perfección a un mal maestro y aun así fallar la tarea.
+
+## Alcance y limitaciones
+
+El modelo no interpreta imágenes: trabaja con características estructuradas y conoce el identificador de cada mapa. La evaluación demuestra que generaliza a pares posición-meta que no vio, no a laberintos totalmente nuevos. Para lograr eso habría que representar las paredes de cualquier mapa y entrenar y evaluar con mapas separados.
